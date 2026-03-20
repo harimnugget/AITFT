@@ -1,0 +1,1395 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI로 만든 공차 광고 — AICC 최종과제</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
+<style>
+/* ── 리셋 & 기반 ── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg:       #0D1117;
+  --bg-alt:   #161B22;
+  --card:     #1E2530;
+  --green:    #27BF58;
+  --green-dim: rgba(39,191,88,0.15);
+  --green-glow: rgba(39,191,88,0.35);
+  --red:      #FF4D4D;
+  --text:     #F0F6FC;
+  --muted:    #7D8590;
+  --line:     rgba(255,255,255,0.07);
+  --font:     'Pretendard', -apple-system, sans-serif;
+
+  --ts-xs:   clamp(0.65rem, 0.9vw,  0.8rem);
+  --ts-sm:   clamp(0.8rem,  1.1vw,  0.95rem);
+  --ts-base: clamp(0.95rem, 1.3vw,  1.1rem);
+  --ts-lg:   clamp(1.2rem,  1.8vw,  1.5rem);
+  --ts-xl:   clamp(1.6rem,  2.6vw,  2.2rem);
+  --ts-2xl:  clamp(2.2rem,  4vw,    3.5rem);
+  --ts-3xl:  clamp(3.5rem,  7vw,    6rem);
+}
+
+html, body {
+  width: 100%; height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+  font-family: var(--font);
+  color: var(--text);
+}
+
+/* ── 슬라이드 컨테이너 ── */
+.deck {
+  position: relative;
+  width: 100vw; height: 100vh;
+}
+
+.slide {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(var(--enter-x, 0px));
+  transition: opacity 0.45s cubic-bezier(0.22,1,0.36,1),
+              transform 0.45s cubic-bezier(0.22,1,0.36,1);
+  overflow: hidden;
+}
+.slide.active {
+  opacity: 1;
+  pointer-events: all;
+  transform: translateX(0);
+}
+.slide.exiting {
+  opacity: 0;
+  transform: translateX(var(--exit-x, 0px));
+  pointer-events: none;
+}
+
+/* ── 공통 노이즈 오버레이 ── */
+.slide::before {
+  content: '';
+  position: absolute; inset: 0;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.035'/%3E%3C/svg%3E");
+  pointer-events: none; z-index: 1;
+}
+
+/* ── 진입 애니메이션 ── */
+@keyframes fadeUp {
+  from { opacity:0; transform:translateY(20px); }
+  to   { opacity:1; transform:translateY(0); }
+}
+@keyframes scaleIn {
+  from { opacity:0; transform:scale(0.93); }
+  to   { opacity:1; transform:scale(1); }
+}
+@keyframes fadeIn {
+  from { opacity:0; }
+  to   { opacity:1; }
+}
+@keyframes slideRight {
+  from { opacity:0; transform:translateX(-20px); }
+  to   { opacity:1; transform:translateX(0); }
+}
+@keyframes glowPulse {
+  0%,100% { box-shadow: 0 0 20px var(--green-glow); }
+  50%      { box-shadow: 0 0 40px var(--green-glow), 0 0 80px var(--green-dim); }
+}
+
+.slide.active .eyebrow  { animation: fadeUp   0.5s 0.00s both cubic-bezier(0.22,1,0.36,1); }
+.slide.active .headline { animation: fadeUp   0.6s 0.10s both cubic-bezier(0.22,1,0.36,1); }
+.slide.active .subline  { animation: fadeUp   0.5s 0.20s both cubic-bezier(0.22,1,0.36,1); }
+.slide.active .body     { animation: fadeUp   0.5s 0.25s both cubic-bezier(0.22,1,0.36,1); }
+.slide.active .visual   { animation: scaleIn  0.7s 0.15s both cubic-bezier(0.22,1,0.36,1); }
+.slide.active .cta      { animation: fadeUp   0.5s 0.35s both cubic-bezier(0.22,1,0.36,1); }
+.slide.active .card     { animation: scaleIn  0.5s calc(var(--i,0)*0.08s + 0.15s) both cubic-bezier(0.22,1,0.36,1); }
+.slide.active .flow-node{ animation: fadeIn   0.4s calc(var(--i,0)*0.1s  + 0.2s)  both; }
+.slide.active .flow-arrow{ animation: fadeIn  0.3s calc(var(--i,0)*0.1s  + 0.35s) both; }
+.slide.active .stat-item{ animation: fadeUp   0.5s calc(var(--i,0)*0.12s + 0.2s)  both cubic-bezier(0.22,1,0.36,1); }
+
+/* ── 공통 유틸 ── */
+.eyebrow {
+  display: inline-block;
+  font-size: var(--ts-xs);
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--green);
+}
+.green { color: var(--green); }
+.muted { color: var(--muted); }
+
+.img-placeholder {
+  background: var(--card);
+  border: 1px dashed rgba(39,191,88,0.3);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  color: var(--muted);
+  font-size: var(--ts-sm);
+  font-weight: 400;
+  text-align: center;
+  padding: 1rem;
+}
+.img-placeholder .ph-icon { font-size: 2rem; opacity: 0.5; }
+.img-placeholder .ph-filename {
+  font-size: var(--ts-xs);
+  color: rgba(39,191,88,0.6);
+  font-family: 'Courier New', monospace;
+  margin-top: 0.25rem;
+}
+
+/* ── UI 크롬 ── */
+.ui-chrome {
+  position: fixed;
+  bottom: 0; left: 0; right: 0;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0 2.5rem 1.2rem;
+}
+.progress-track {
+  flex: 1;
+  height: 2px;
+  background: rgba(255,255,255,0.08);
+  border-radius: 1px;
+  overflow: hidden;
+}
+.progress-bar {
+  height: 100%;
+  background: var(--green);
+  border-radius: 1px;
+  transition: width 0.4s cubic-bezier(0.22,1,0.36,1);
+  box-shadow: 0 0 8px var(--green-glow);
+}
+.slide-counter {
+  font-size: var(--ts-xs);
+  font-weight: 300;
+  color: var(--muted);
+  white-space: nowrap;
+  min-width: 3.5rem;
+  text-align: right;
+}
+.nav-hint {
+  font-size: var(--ts-xs);
+  color: rgba(125,133,144,0.5);
+  white-space: nowrap;
+}
+
+/* ═══════════════════════════════════
+   슬라이드 1 — 풀 커버
+═══════════════════════════════════ */
+#s1 {
+  background:
+    radial-gradient(ellipse 70% 70% at 50% 50%, rgba(39,191,88,0.18) 0%, transparent 65%),
+    radial-gradient(ellipse 40% 40% at 80% 20%, rgba(39,191,88,0.08) 0%, transparent 60%),
+    var(--bg);
+}
+#s1 .s1-inner {
+  position: relative; z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  text-align: center;
+  padding: 4rem;
+}
+#s1 .s1-play {
+  width: clamp(5rem, 10vw, 8rem);
+  height: clamp(5rem, 10vw, 8rem);
+  border-radius: 50%;
+  border: 2px solid rgba(39,191,88,0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 2.5rem;
+  animation: glowPulse 2.5s ease-in-out infinite;
+  background: rgba(39,191,88,0.08);
+}
+#s1 .s1-play svg { width: 40%; height: 40%; margin-left: 8%; fill: var(--green); }
+#s1 .headline {
+  font-size: var(--ts-2xl);
+  font-weight: 900;
+  line-height: 1.1;
+  margin-bottom: 1rem;
+}
+#s1 .headline em { font-style: normal; color: var(--green); }
+#s1 .subline {
+  font-size: var(--ts-base);
+  font-weight: 300;
+  color: var(--muted);
+  margin-bottom: 2.5rem;
+}
+#s1 .s1-meta {
+  display: flex;
+  gap: 2rem;
+  align-items: center;
+  font-size: var(--ts-sm);
+  color: var(--muted);
+}
+#s1 .s1-meta span { color: var(--text); font-weight: 500; }
+#s1 .s1-grid-bg {
+  position: absolute; inset: 0; z-index: 1;
+  background-image:
+    repeating-linear-gradient(0deg, transparent, transparent 60px, rgba(39,191,88,0.03) 60px, rgba(39,191,88,0.03) 61px),
+    repeating-linear-gradient(90deg, transparent, transparent 60px, rgba(39,191,88,0.03) 60px, rgba(39,191,88,0.03) 61px);
+}
+
+/* ═══════════════════════════════════
+   슬라이드 2 — 기획의도
+═══════════════════════════════════ */
+#s2 {
+  background:
+    radial-gradient(ellipse 60% 80% at 10% 50%, rgba(39,191,88,0.07) 0%, transparent 55%),
+    var(--bg);
+}
+#s2 .s2-inner {
+  position: relative; z-index: 2;
+  display: grid;
+  grid-template-columns: 3fr 2fr;
+  height: 100%;
+  padding: 5vh 5vw;
+  gap: 4vw;
+  align-items: center;
+}
+#s2 .s2-left { display: flex; flex-direction: column; gap: 1.2rem; }
+#s2 .headline {
+  font-size: var(--ts-xl);
+  font-weight: 900;
+  line-height: 1.15;
+  position: relative;
+  padding-left: 1.2rem;
+}
+#s2 .headline::before {
+  content: '';
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 3px;
+  background: var(--green);
+  border-radius: 2px;
+}
+#s2 .bullet-list { list-style: none; display: flex; flex-direction: column; gap: 1rem; margin-top: 0.5rem; }
+#s2 .bullet-list li {
+  display: flex;
+  gap: 0.8rem;
+  font-size: var(--ts-base);
+  font-weight: 400;
+  line-height: 1.6;
+  color: rgba(240,246,252,0.85);
+}
+#s2 .bullet-list li .bl-arrow {
+  color: var(--green);
+  font-weight: 700;
+  flex-shrink: 0;
+  margin-top: 0.05em;
+}
+#s2 .bullet-list li .hl { color: var(--green); font-weight: 600; }
+#s2 .s2-right {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+#s2 .s2-img { width: 100%; aspect-ratio: 3/4; max-height: 70vh; }
+
+/* ═══════════════════════════════════
+   슬라이드 3 — 툴 그리드
+═══════════════════════════════════ */
+#s3 {
+  background:
+    radial-gradient(ellipse 80% 50% at 50% 100%, rgba(39,191,88,0.06) 0%, transparent 55%),
+    var(--bg);
+}
+#s3 .s3-inner {
+  position: relative; z-index: 2;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: 5vh 5vw 8vh;
+  gap: 3vh;
+}
+#s3 .s3-header { display: flex; flex-direction: column; gap: 0.5rem; }
+#s3 .headline { font-size: var(--ts-xl); font-weight: 900; }
+#s3 .tool-grid {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 2fr 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+  gap: 1rem;
+}
+.tool-card {
+  background: var(--card);
+  border: 1px solid rgba(39,191,88,0.2);
+  border-radius: 10px;
+  padding: 1.2rem 1.4rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  transition: transform 0.2s cubic-bezier(0.22,1,0.36,1), box-shadow 0.2s ease;
+}
+.tool-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 12px 32px rgba(0,0,0,0.4), 0 0 0 1px rgba(39,191,88,0.35);
+}
+.tool-card.featured {
+  grid-column: 1;
+  grid-row: 1 / 3;
+  border-color: var(--green);
+  box-shadow: 0 0 20px rgba(39,191,88,0.12);
+  justify-content: center;
+}
+.tool-card .tc-cat {
+  font-size: var(--ts-xs);
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--green);
+}
+.tool-card .tc-name {
+  font-size: var(--ts-lg);
+  font-weight: 800;
+  color: var(--text);
+  line-height: 1.2;
+}
+.tool-card.featured .tc-name { font-size: var(--ts-xl); }
+.tool-card .tc-desc {
+  font-size: var(--ts-xs);
+  color: var(--muted);
+  line-height: 1.5;
+  margin-top: 0.2rem;
+}
+.tool-card.featured .tc-hub-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: var(--ts-xs);
+  color: var(--green);
+  background: var(--green-dim);
+  border: 1px solid rgba(39,191,88,0.3);
+  border-radius: 20px;
+  padding: 0.2rem 0.7rem;
+  margin-top: 0.8rem;
+  width: fit-content;
+}
+
+/* ═══════════════════════════════════
+   슬라이드 4 — 프로세스 플로우
+═══════════════════════════════════ */
+#s4 {
+  background:
+    radial-gradient(ellipse 50% 60% at 50% 50%, rgba(39,191,88,0.05) 0%, transparent 60%),
+    var(--bg);
+}
+#s4 .s4-inner {
+  position: relative; z-index: 2;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: 5vh 5vw 8vh;
+  gap: 2.5vh;
+}
+#s4 .headline { font-size: var(--ts-xl); font-weight: 900; }
+#s4 .flow-wrap {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+  padding: 1.5rem 0;
+}
+.flow-node {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.6rem;
+  min-width: 9rem;
+}
+.flow-node .fn-circle {
+  width: clamp(3.5rem, 6vw, 5rem);
+  height: clamp(3.5rem, 6vw, 5rem);
+  border-radius: 50%;
+  background: var(--card);
+  border: 2px solid rgba(39,191,88,0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--ts-xl);
+  transition: box-shadow 0.3s;
+}
+.flow-node:hover .fn-circle { box-shadow: 0 0 20px var(--green-glow); }
+.flow-node .fn-label {
+  font-size: var(--ts-xs);
+  font-weight: 600;
+  color: var(--text);
+  text-align: center;
+  line-height: 1.3;
+}
+.flow-node .fn-sub {
+  font-size: var(--ts-xs);
+  color: var(--muted);
+  text-align: center;
+  line-height: 1.3;
+}
+.flow-arrow {
+  font-size: var(--ts-lg);
+  color: var(--green);
+  flex-shrink: 0;
+  opacity: 0.7;
+  padding: 0 0.2rem;
+  padding-bottom: 2.5rem;
+}
+#s4 .detail-list {
+  list-style: none;
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 0.8rem;
+}
+#s4 .detail-list li {
+  background: var(--card);
+  border-radius: 8px;
+  padding: 0.8rem 1rem;
+  font-size: var(--ts-xs);
+  color: rgba(240,246,252,0.75);
+  line-height: 1.5;
+  border-top: 2px solid rgba(39,191,88,0.2);
+}
+#s4 .detail-list li strong {
+  display: block;
+  color: var(--green);
+  margin-bottom: 0.25rem;
+  font-size: var(--ts-xs);
+}
+
+/* ═══════════════════════════════════
+   슬라이드 5 — 실제 작업 화면
+═══════════════════════════════════ */
+#s5 {
+  background:
+    radial-gradient(ellipse 70% 60% at 80% 50%, rgba(39,191,88,0.06) 0%, transparent 55%),
+    var(--bg);
+}
+#s5 .s5-inner {
+  position: relative; z-index: 2;
+  display: grid;
+  grid-template-columns: 2fr 3fr;
+  height: 100%;
+  padding: 5vh 5vw 8vh;
+  gap: 4vw;
+  align-items: center;
+}
+#s5 .s5-left { display: flex; flex-direction: column; gap: 1.2rem; }
+#s5 .headline { font-size: var(--ts-xl); font-weight: 900; line-height: 1.2; }
+#s5 .feat-list { list-style: none; display: flex; flex-direction: column; gap: 0.9rem; }
+#s5 .feat-list li {
+  display: flex;
+  gap: 0.7rem;
+  font-size: var(--ts-sm);
+  color: rgba(240,246,252,0.8);
+  line-height: 1.55;
+}
+#s5 .feat-list li::before {
+  content: '▸';
+  color: var(--green);
+  flex-shrink: 0;
+  margin-top: 0.1em;
+}
+#s5 .s5-right { height: 70vh; }
+#s5 .s5-img {
+  width: 100%; height: 100%;
+  border-radius: 10px;
+  box-shadow: 0 0 0 1px rgba(39,191,88,0.2), 0 20px 60px rgba(0,0,0,0.5), 0 0 40px rgba(39,191,88,0.08);
+}
+
+/* ═══════════════════════════════════
+   슬라이드 6 — 노하우 ① 얼굴 일관성
+═══════════════════════════════════ */
+#s6 {
+  background:
+    radial-gradient(ellipse 40% 60% at 0% 50%, rgba(255,77,77,0.04) 0%, transparent 55%),
+    radial-gradient(ellipse 40% 60% at 100% 50%, rgba(39,191,88,0.06) 0%, transparent 55%),
+    var(--bg);
+}
+#s6 .s6-inner {
+  position: relative; z-index: 2;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: 5vh 5vw 8vh;
+  gap: 2vh;
+}
+#s6 .s6-top { display: flex; flex-direction: column; gap: 0.4rem; }
+#s6 .headline { font-size: var(--ts-xl); font-weight: 900; }
+#s6 .s6-cols {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1fr 40px 1fr;
+  gap: 1rem;
+  align-items: stretch;
+  min-height: 0;
+}
+.prob-col, .sol-col {
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+}
+.col-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: var(--ts-xs);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  padding: 0.25rem 0.7rem;
+  border-radius: 4px;
+  width: fit-content;
+}
+.col-label.prob { background: rgba(255,77,77,0.12); color: #FF6B6B; border: 1px solid rgba(255,77,77,0.25); }
+.col-label.sol  { background: var(--green-dim); color: var(--green); border: 1px solid rgba(39,191,88,0.25); }
+.prob-col .item-card, .sol-col .item-card {
+  background: var(--card);
+  border-radius: 8px;
+  padding: 0.8rem 1rem;
+  font-size: var(--ts-sm);
+  color: rgba(240,246,252,0.85);
+  line-height: 1.5;
+  flex: 1;
+  display: flex;
+  align-items: center;
+}
+.prob-col .item-card { border-left: 3px solid rgba(255,77,77,0.4); }
+.sol-col .item-card  { border-left: 3px solid rgba(39,191,88,0.5); }
+.s6-divider {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--green);
+  font-size: var(--ts-xl);
+  font-weight: 300;
+}
+.s6-img-row {
+  display: grid;
+  grid-template-columns: 1fr 40px 1fr;
+  gap: 1rem;
+  height: 22%;
+}
+.s6-img-row .img-placeholder { height: 100%; }
+.s6-img-row .arrow-mid {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--green);
+  font-size: var(--ts-lg);
+}
+
+/* ═══════════════════════════════════
+   슬라이드 7 — 노하우 ② 재합성
+═══════════════════════════════════ */
+#s7 {
+  background:
+    radial-gradient(ellipse 50% 50% at 70% 30%, rgba(39,191,88,0.06) 0%, transparent 55%),
+    var(--bg);
+}
+#s7 .s7-inner {
+  position: relative; z-index: 2;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  height: 100%;
+  padding: 5vh 5vw 8vh;
+  gap: 3vw;
+}
+#s7 .s7-left { display: flex; flex-direction: column; gap: 1.2rem; justify-content: center; }
+#s7 .headline { font-size: var(--ts-xl); font-weight: 900; line-height: 1.2; }
+#s7 .step-list { list-style: none; display: flex; flex-direction: column; gap: 0.8rem; }
+#s7 .step-list li {
+  display: flex;
+  gap: 0.7rem;
+  font-size: var(--ts-sm);
+  color: rgba(240,246,252,0.82);
+  line-height: 1.55;
+}
+#s7 .step-list li .tag {
+  font-size: var(--ts-xs);
+  font-weight: 700;
+  padding: 0.15rem 0.5rem;
+  border-radius: 4px;
+  flex-shrink: 0;
+  margin-top: 0.1em;
+  height: fit-content;
+}
+#s7 .step-list li .tag.prob { background: rgba(255,77,77,0.15); color: #FF6B6B; }
+#s7 .step-list li .tag.sol  { background: var(--green-dim); color: var(--green); }
+#s7 .s7-right {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  justify-content: center;
+}
+#s7 .code-block {
+  background: #010409;
+  border-left: 4px solid var(--green);
+  border-radius: 0 8px 8px 0;
+  padding: 1.2rem 1.4rem;
+  font-family: 'Courier New', 'Consolas', monospace;
+  font-size: var(--ts-sm);
+  color: var(--green);
+  line-height: 1.6;
+  box-shadow: 0 0 20px rgba(39,191,88,0.08);
+}
+#s7 .code-block .code-label {
+  font-size: var(--ts-xs);
+  color: var(--muted);
+  font-family: var(--font);
+  margin-bottom: 0.5rem;
+  display: block;
+}
+#s7 .img-pair {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  gap: 0.5rem;
+  align-items: center;
+  flex: 1;
+  min-height: 0;
+}
+#s7 .img-pair .arrow-mid { color: var(--green); font-size: var(--ts-lg); text-align: center; }
+#s7 .img-pair .img-placeholder { height: 100%; min-height: 8rem; }
+
+/* ═══════════════════════════════════
+   슬라이드 8 — 노하우 ③ 40개
+═══════════════════════════════════ */
+#s8 {
+  background:
+    radial-gradient(ellipse 60% 60% at 50% 0%, rgba(39,191,88,0.1) 0%, transparent 55%),
+    var(--bg);
+}
+#s8 .s8-inner {
+  position: relative; z-index: 2;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: 4vh 6vw 8vh;
+  gap: 2.5vh;
+}
+#s8 .s8-stats {
+  display: flex;
+  gap: 3rem;
+  align-items: flex-end;
+}
+.stat-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+.stat-item .stat-num {
+  font-size: var(--ts-3xl);
+  font-weight: 900;
+  color: var(--green);
+  line-height: 0.9;
+  text-shadow: 0 0 40px rgba(39,191,88,0.5);
+}
+.stat-item .stat-label {
+  font-size: var(--ts-sm);
+  color: var(--muted);
+  font-weight: 400;
+}
+#s8 .s8-body {
+  display: grid;
+  grid-template-columns: 2fr 3fr;
+  gap: 3vw;
+  flex: 1;
+  min-height: 0;
+}
+#s8 .s8-bullets {
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+  justify-content: center;
+}
+#s8 .s8-bullets li {
+  list-style: none;
+  display: flex;
+  gap: 0.6rem;
+  font-size: var(--ts-sm);
+  color: rgba(240,246,252,0.82);
+  line-height: 1.55;
+}
+#s8 .s8-bullets li::before { content: '▸'; color: var(--green); flex-shrink: 0; margin-top: 0.1em; }
+#s8 .s8-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  grid-template-rows: repeat(2, 1fr);
+  gap: 0.5rem;
+}
+#s8 .s8-grid .img-placeholder {
+  font-size: var(--ts-xs);
+  padding: 0.4rem;
+  gap: 0.2rem;
+}
+#s8 .s8-grid .img-placeholder .ph-icon { font-size: 1.2rem; }
+#s8 .s8-grid .img-placeholder .ph-filename { font-size: 0.6rem; }
+
+/* ═══════════════════════════════════
+   슬라이드 9 — 소소한 팁
+═══════════════════════════════════ */
+#s9 {
+  background:
+    radial-gradient(ellipse 70% 40% at 50% 100%, rgba(39,191,88,0.07) 0%, transparent 55%),
+    var(--bg);
+}
+#s9 .s9-inner {
+  position: relative; z-index: 2;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: 5vh 5vw 8vh;
+  gap: 2.5vh;
+}
+#s9 .headline { font-size: var(--ts-xl); font-weight: 900; }
+#s9 .s9-body {
+  display: grid;
+  grid-template-columns: 3fr 2fr;
+  gap: 3vw;
+  flex: 1;
+  min-height: 0;
+  align-items: center;
+}
+#s9 .s9-bullets { list-style: none; display: flex; flex-direction: column; gap: 0.9rem; }
+#s9 .s9-bullets li {
+  display: flex;
+  gap: 0.7rem;
+  font-size: var(--ts-sm);
+  color: rgba(240,246,252,0.82);
+  line-height: 1.55;
+}
+#s9 .s9-bullets li::before { content: '▸'; color: var(--green); flex-shrink: 0; margin-top: 0.1em; }
+#s9 .s9-right {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  height: 100%;
+  justify-content: center;
+}
+#s9 .s9-img { flex: 1; min-height: 0; max-height: 50vh; }
+#s9 .flow-mini {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+}
+.fm-node {
+  background: var(--card);
+  border: 1px solid rgba(39,191,88,0.25);
+  border-radius: 8px;
+  padding: 0.5rem 0.8rem;
+  font-size: var(--ts-xs);
+  font-weight: 600;
+  color: var(--text);
+  text-align: center;
+  white-space: nowrap;
+}
+.fm-node .fm-icon { font-size: 1.2rem; display: block; margin-bottom: 0.2rem; }
+.fm-arrow { color: var(--green); font-size: var(--ts-base); padding: 0 0.3rem; opacity: 0.7; }
+
+/* ═══════════════════════════════════
+   슬라이드 10 — 추천 이유 ①
+═══════════════════════════════════ */
+#s10 {
+  background:
+    radial-gradient(ellipse 30% 80% at 5% 50%, rgba(39,191,88,0.07) 0%, transparent 50%),
+    radial-gradient(ellipse 50% 50% at 90% 80%, rgba(39,191,88,0.04) 0%, transparent 55%),
+    var(--bg);
+}
+#s10 .s10-inner {
+  position: relative; z-index: 2;
+  display: grid;
+  grid-template-columns: auto 1fr 1fr;
+  height: 100%;
+  padding: 5vh 5vw 8vh;
+  gap: 3vw;
+  align-items: center;
+}
+#s10 .s10-index {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.3rem;
+  border-right: 1px solid var(--line);
+  padding-right: 3vw;
+}
+#s10 .s10-index .idx-num {
+  font-size: var(--ts-3xl);
+  font-weight: 900;
+  color: var(--green);
+  line-height: 0.9;
+  opacity: 0.25;
+  text-shadow: 0 0 40px rgba(39,191,88,0.4);
+}
+#s10 .s10-index .idx-label {
+  font-size: var(--ts-xs);
+  color: var(--muted);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+#s10 .s10-mid { display: flex; flex-direction: column; gap: 1.2rem; }
+#s10 .headline { font-size: var(--ts-xl); font-weight: 900; line-height: 1.2; }
+#s10 .feat-cards { display: flex; flex-direction: column; gap: 0.7rem; }
+#s10 .feat-card {
+  background: var(--card);
+  border-radius: 8px;
+  padding: 0.8rem 1rem;
+  font-size: var(--ts-sm);
+  color: rgba(240,246,252,0.82);
+  line-height: 1.5;
+  border-left: 3px solid rgba(39,191,88,0.4);
+  transition: border-color 0.2s, transform 0.2s;
+}
+#s10 .feat-card:hover { border-color: var(--green); transform: translateX(4px); }
+#s10 .s10-right { height: 65vh; }
+#s10 .s10-img { width: 100%; height: 100%; border-radius: 10px; box-shadow: 0 0 0 1px rgba(39,191,88,0.15), 0 20px 50px rgba(0,0,0,0.4); }
+
+/* ═══════════════════════════════════
+   슬라이드 11 — 추천 이유 ②
+═══════════════════════════════════ */
+#s11 {
+  background:
+    radial-gradient(ellipse 70% 50% at 50% 110%, rgba(39,191,88,0.12) 0%, transparent 55%),
+    radial-gradient(ellipse 40% 40% at 90% 10%, rgba(39,191,88,0.05) 0%, transparent 50%),
+    var(--bg);
+}
+#s11 .s11-inner {
+  position: relative; z-index: 2;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: 5vh 5vw 8vh;
+  gap: 2.5vh;
+}
+#s11 .s11-top { display: flex; align-items: baseline; gap: 1rem; }
+#s11 .s11-index-num {
+  font-size: var(--ts-3xl);
+  font-weight: 900;
+  color: var(--green);
+  opacity: 0.2;
+  line-height: 0.9;
+}
+#s11 .headline { font-size: var(--ts-xl); font-weight: 900; line-height: 1.2; }
+#s11 .s11-body {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 2fr 3fr;
+  gap: 3vw;
+  min-height: 0;
+  align-items: center;
+}
+#s11 .s11-bullets { list-style: none; display: flex; flex-direction: column; gap: 0.8rem; }
+#s11 .s11-bullets li {
+  display: flex;
+  gap: 0.7rem;
+  font-size: var(--ts-sm);
+  color: rgba(240,246,252,0.82);
+  line-height: 1.55;
+}
+#s11 .s11-bullets li::before { content: '▸'; color: var(--green); flex-shrink: 0; margin-top: 0.1em; }
+#s11 .workflow-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+}
+#s11 .wf-label {
+  font-size: var(--ts-xs);
+  color: var(--muted);
+  text-align: center;
+  letter-spacing: 0.06em;
+}
+#s11 .wf-flow {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  background: rgba(13,17,23,0.6);
+  border: 1px solid rgba(39,191,88,0.2);
+  border-radius: 12px;
+  padding: 0.8rem 1rem;
+}
+.wf-step {
+  flex: 1;
+  background: var(--card);
+  border: 1px solid rgba(39,191,88,0.25);
+  border-radius: 8px;
+  padding: 0.7rem 0.5rem;
+  text-align: center;
+  font-size: var(--ts-xs);
+  font-weight: 600;
+  color: var(--text);
+  line-height: 1.4;
+  transition: box-shadow 0.2s;
+}
+.wf-step:hover { box-shadow: 0 0 12px var(--green-glow); }
+.wf-step .wf-icon { font-size: 1.1rem; display: block; margin-bottom: 0.2rem; }
+.wf-step .wf-sub { font-size: 0.6rem; color: var(--muted); font-weight: 400; display: block; margin-top: 0.15rem; }
+.wf-arrow { color: var(--green); font-size: var(--ts-base); padding: 0 0.4rem; opacity: 0.6; flex-shrink: 0; }
+#s11 .wf-caption {
+  text-align: center;
+  font-size: var(--ts-xs);
+  color: var(--green);
+  background: var(--green-dim);
+  border: 1px solid rgba(39,191,88,0.25);
+  border-radius: 20px;
+  padding: 0.3rem 1rem;
+  width: fit-content;
+  align-self: center;
+}
+
+/* ── 인쇄 CSS ── */
+@media print {
+  .ui-chrome { display: none !important; }
+  .slide {
+    position: relative !important;
+    display: block !important;
+    opacity: 1 !important;
+    transform: none !important;
+    pointer-events: all !important;
+    page-break-after: always;
+    width: 100%; height: 100vh;
+    overflow: hidden;
+  }
+}
+</style>
+</head>
+<body>
+
+<div class="deck">
+
+  <!-- ═════ 슬라이드 1 ═════ -->
+  <section class="slide active" id="s1">
+    <div class="s1-grid-bg"></div>
+    <div class="s1-inner">
+      <div class="visual" style="width:min(65vw,75vh);aspect-ratio:16/9;border-radius:12px;overflow:hidden;border:1px solid rgba(39,191,88,0.35);box-shadow:0 0 50px rgba(39,191,88,0.2),0 0 0 1px rgba(39,191,88,0.15);">
+        <video src="공차_발표_이미지/slide1_result.mp4" controls playsinline style="width:100%;height:100%;object-fit:cover;display:block;"></video>
+      </div>
+      <span class="eyebrow">AICC 최종과제 발표</span>
+      <h1 class="headline">AI로 만든<br><em>공차 광고</em></h1>
+      <p class="subline">결과물 영상을 먼저 보여드리겠습니다</p>
+      <div class="s1-meta cta">
+        <span>마컴 1팀 <span>장하림</span></span>
+        <span style="color:var(--line)">|</span>
+        <span>Tune the vibe with 공차</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═════ 슬라이드 2 ═════ -->
+  <section class="slide" id="s2">
+    <div class="s2-inner">
+      <div class="s2-left body">
+        <span class="eyebrow">기획의도</span>
+        <h2 class="headline">공차 브랜드 메시지로<br>AI 광고를 만들다</h2>
+        <ul class="bullet-list">
+          <li>
+            <span class="bl-arrow">→</span>
+            AI TFT 최종과제로 팀 내 진행 중인 <span class="hl">'공차 인스타그램 운영'</span> 프로젝트와 연계
+          </li>
+          <li>
+            <span class="bl-arrow">→</span>
+            <span class="hl">'Tune the vibe with 공차'</span> 캠페인 메시지를 담아 AI 광고 제작에 도전
+          </li>
+          <li>
+            <span class="bl-arrow">→</span>
+            공차는 이미 AI로 씨즐영상을 제작 중 — <span class="hl">고객사 만족도 높은 레퍼런스 존재</span>
+          </li>
+        </ul>
+      </div>
+      <div class="s2-right visual" style="display:flex;gap:1rem;align-items:center;justify-content:center;">
+        <!-- 9:16 portrait container — white letterbox -->
+        <div style="aspect-ratio:9/16;max-height:72vh;background:#ffffff;border-radius:10px;overflow:hidden;flex-shrink:0;box-shadow:0 4px 24px rgba(0,0,0,0.4);border:1px solid rgba(39,191,88,0.2);">
+          <img src="공차_발표_이미지/slide2_brand1.png" style="width:100%;height:100%;object-fit:contain;display:block;">
+        </div>
+        <div style="aspect-ratio:9/16;max-height:72vh;background:#ffffff;border-radius:10px;overflow:hidden;flex-shrink:0;box-shadow:0 4px 24px rgba(0,0,0,0.4);border:1px solid rgba(39,191,88,0.25);">
+          <video src="공차_발표_이미지/slide2_brand2.mp4" autoplay muted loop playsinline style="width:100%;height:100%;object-fit:contain;display:block;"></video>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═════ 슬라이드 3 ═════ -->
+  <section class="slide" id="s3">
+    <div class="s3-inner">
+      <div class="s3-header">
+        <span class="eyebrow">제작 프로세스 및 주요 활용 툴</span>
+        <h2 class="headline">프리픽을 허브로, 멀티 AI 모델 조합</h2>
+      </div>
+      <div class="tool-grid body">
+        <div class="tool-card featured card" style="--i:0">
+          <span class="tc-cat">Platform · Hub</span>
+          <span class="tc-name">Freepik</span>
+          <span class="tc-desc">전체 워크스페이스 구성 및 통합 관리.<br>노드 기반으로 모든 생성 과정을 연결.</span>
+          <span class="tc-hub-label">⬡ 허브 역할</span>
+        </div>
+        <div class="tool-card card" style="--i:1">
+          <span class="tc-cat">Image</span>
+          <span class="tc-name">Nano Banana Pro</span>
+          <span class="tc-desc">고품질 인물·제품 이미지 생성</span>
+        </div>
+        <div class="tool-card card" style="--i:2">
+          <span class="tc-cat">Video</span>
+          <span class="tc-name">Kling 3.0</span>
+          <span class="tc-desc">이미지를 자연스러운 영상으로 변환</span>
+        </div>
+        <div class="tool-card card" style="--i:3">
+          <span class="tc-cat">Audio</span>
+          <span class="tc-name">ElevenLabs</span>
+          <span class="tc-desc">AI 보이스오버 및 음성 생성</span>
+        </div>
+        <div class="tool-card card" style="--i:4">
+          <span class="tc-cat">LLM</span>
+          <span class="tc-name">Gemini / GPT</span>
+          <span class="tc-desc">아이디어를 정제된 프롬프트로 변환</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═════ 슬라이드 4 ═════ -->
+  <section class="slide" id="s4">
+    <div class="s4-inner">
+      <span class="eyebrow">제작 프로세스</span>
+      <h2 class="headline">아이디어에서 완성 광고까지</h2>
+      <div class="flow-wrap">
+        <div class="flow-node" style="--i:0">
+          <div class="fn-circle">💡</div>
+          <span class="fn-label">아이디어</span>
+          <span class="fn-sub">캠페인 방향<br>장면 구성</span>
+        </div>
+        <span class="flow-arrow" style="--i:0">→</span>
+        <div class="flow-node" style="--i:1">
+          <div class="fn-circle">🤖</div>
+          <span class="fn-label">LLM</span>
+          <span class="fn-sub">Gemini<br>프롬프트 정제</span>
+        </div>
+        <span class="flow-arrow" style="--i:1">→</span>
+        <div class="flow-node" style="--i:2">
+          <div class="fn-circle">✦</div>
+          <span class="fn-label">Freepik</span>
+          <span class="fn-sub">이미지·영상<br>자동 생성</span>
+        </div>
+        <span class="flow-arrow" style="--i:2">→</span>
+        <div class="flow-node" style="--i:3">
+          <div class="fn-circle">🎯</div>
+          <span class="fn-label">선별·조합</span>
+          <span class="fn-sub">최적 컷<br>선택</span>
+        </div>
+        <span class="flow-arrow" style="--i:3">→</span>
+        <div class="flow-node" style="--i:4">
+          <div class="fn-circle">🎬</div>
+          <span class="fn-label">최종 광고</span>
+          <span class="fn-sub">음성·음악<br>편집 완성</span>
+        </div>
+      </div>
+      <!-- 텍스트 설명 카드 -->
+      <ul class="detail-list body">
+        <li><strong>① 기획</strong>캠페인 방향 및 장면 구성</li>
+        <li><strong>② 프롬프트화</strong>LLM이 AI 언어로 번역</li>
+        <li><strong>③ 생성</strong>프리픽 노드에서 자동 처리</li>
+        <li><strong>④ 큐레이션</strong>결과물 중 최적 컷 선별</li>
+        <li><strong>⑤ 완성</strong>음성·음악 합성 후 마무리</li>
+      </ul>
+      <!-- 예시 이미지 (1:1 소형) -->
+      <div class="body" style="display:grid;grid-template-columns:repeat(5,1fr);gap:0.7rem;">
+        <div style="aspect-ratio:1/1;border-radius:8px;overflow:hidden;border:1px solid rgba(39,191,88,0.15);">
+          <img src="공차_발표_이미지/slide4_overview1.png" style="width:100%;height:100%;object-fit:cover;display:block;">
+        </div>
+        <div style="aspect-ratio:1/1;border-radius:8px;overflow:hidden;border:1px solid rgba(39,191,88,0.15);">
+          <img src="공차_발표_이미지/slide4_prompt.png" style="width:100%;height:100%;object-fit:cover;display:block;">
+        </div>
+        <div style="aspect-ratio:1/1;border-radius:8px;overflow:hidden;border:1px solid rgba(39,191,88,0.15);">
+          <img src="공차_발표_이미지/slide4_image.png" style="width:100%;height:100%;object-fit:cover;display:block;">
+        </div>
+        <div style="aspect-ratio:1/1;border-radius:8px;overflow:hidden;border:1px solid rgba(39,191,88,0.15);">
+          <img src="공차_발표_이미지/slide4_curating.png" style="width:100%;height:100%;object-fit:cover;display:block;">
+        </div>
+        <div style="aspect-ratio:1/1;border-radius:8px;overflow:hidden;border:1px solid rgba(39,191,88,0.15);">
+          <img src="공차_발표_이미지/slide4_editing.png" style="width:100%;height:100%;object-fit:cover;display:block;">
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═════ 슬라이드 5 ═════ -->
+  <section class="slide" id="s5">
+    <div class="s5-inner">
+      <div class="s5-left">
+        <span class="eyebrow">실제 작업 화면</span>
+        <h2 class="headline">프리픽 노드 워크스페이스에서<br>전체 흐름을 한눈에</h2>
+        <ul class="feat-list body">
+          <li>각 노드가 이미지·영상·텍스트 생성 단계를 시각적으로 연결</li>
+          <li>결과물끼리 어떻게 연결되는지 한 화면에서 확인 가능</li>
+          <li>수정이 필요한 노드만 선택해 재생성 → 전체 흐름 유지</li>
+        </ul>
+      </div>
+      <div class="s5-right visual">
+        <img src="공차_발표_이미지/slide5_workspace.png" class="s5-img" style="width:100%;height:100%;object-fit:cover;border-radius:10px;box-shadow:0 0 0 1px rgba(39,191,88,0.2),0 20px 60px rgba(0,0,0,0.5),0 0 40px rgba(39,191,88,0.08);">
+      </div>
+    </div>
+  </section>
+
+  <!-- ═════ 슬라이드 6 ═════ -->
+  <section class="slide" id="s6">
+    <div style="position:relative;z-index:2;display:grid;grid-template-columns:1fr 1fr;height:100%;padding:5vh 5vw 8vh;gap:4vw;align-items:center;">
+      <div style="display:flex;flex-direction:column;gap:1.4rem;">
+        <span class="eyebrow">제작 노하우 ①</span>
+        <h2 class="headline" style="font-size:var(--ts-xl);font-weight:900;line-height:1.2;position:relative;padding-left:1.2rem;">
+          <span style="position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--green);border-radius:2px;"></span>
+          주인공 얼굴 일관성 유지
+        </h2>
+        <div class="body" style="display:flex;flex-direction:column;gap:0.8rem;">
+          <div style="background:rgba(255,77,77,0.07);border:1px solid rgba(255,77,77,0.2);border-radius:8px;padding:1rem 1.2rem;">
+            <span style="font-size:var(--ts-xs);font-weight:700;color:#FF6B6B;letter-spacing:0.08em;display:block;margin-bottom:0.4rem;">⚠ 문제</span>
+            <p style="font-size:var(--ts-sm);color:rgba(240,246,252,0.85);line-height:1.6;">AI로 생성하다 보면 장면마다 <strong style="color:#FF8080;">주인공 얼굴이 바뀌는</strong> 문제 발생</p>
+          </div>
+          <div style="background:var(--green-dim);border:1px solid rgba(39,191,88,0.25);border-radius:8px;padding:1rem 1.2rem;">
+            <span style="font-size:var(--ts-xs);font-weight:700;color:var(--green);letter-spacing:0.08em;display:block;margin-bottom:0.4rem;">✓ 해결</span>
+            <p style="font-size:var(--ts-sm);color:rgba(240,246,252,0.85);line-height:1.6;"><strong style="color:var(--green);">기준 모델 이미지</strong>를 먼저 제작하고, 모든 후속 생성의 <strong style="color:var(--green);">앵커(Anchor)</strong>로 연결</p>
+          </div>
+          <div style="background:var(--card);border:1px solid rgba(255,255,255,0.07);border-radius:8px;padding:1rem 1.2rem;">
+            <span style="font-size:var(--ts-xs);font-weight:700;color:var(--muted);letter-spacing:0.08em;display:block;margin-bottom:0.4rem;">✦ 결과</span>
+            <p style="font-size:var(--ts-sm);color:rgba(240,246,252,0.85);line-height:1.6;">장면 간 오차율 최소화 → <strong style="color:var(--green);">동일 인물처럼 자연스러운 연결</strong></p>
+          </div>
+        </div>
+      </div>
+      <div class="visual" style="display:flex;align-items:center;justify-content:center;">
+        <img src="공차_발표_이미지/slide6_model.png" style="max-width:100%;max-height:68vh;width:auto;height:auto;object-fit:contain;border-radius:10px;box-shadow:0 0 0 1px rgba(39,191,88,0.2),0 20px 60px rgba(0,0,0,0.5);">
+      </div>
+    </div>
+  </section>
+
+  <!-- ═════ 슬라이드 7 ═════ -->
+  <section class="slide" id="s7">
+    <div class="s7-inner">
+      <div class="s7-left">
+        <span class="eyebrow">제작 노하우 ②</span>
+        <h2 class="headline">원하는 요소만<br>골라 재합성</h2>
+        <ul class="step-list body">
+          <li><span class="tag prob">문제</span>'이 이미지에서 저 요소만 바꾸면 완벽한데...'하는 순간 반복</li>
+          <li><span class="tag sol">해결</span>프리픽 이미지 연결 기능으로 참고할 이미지를 지정</li>
+          <li><span class="tag sol">해결</span>원하는 요소만 교체하도록 프롬프트로 지시</li>
+        </ul>
+      </div>
+      <div class="s7-right visual" style="display:flex;align-items:center;justify-content:center;">
+        <div style="position:relative;max-width:100%;max-height:65vh;border-radius:10px;overflow:hidden;box-shadow:0 0 0 1px rgba(39,191,88,0.2),0 20px 60px rgba(0,0,0,0.5);display:flex;">
+          <img src="공차_발표_이미지/slide7_image.png" style="max-width:100%;max-height:65vh;width:auto;height:auto;object-fit:contain;display:block;">
+          <div style="position:absolute;bottom:0;left:0;right:0;background:linear-gradient(to top,rgba(13,17,23,0.97) 0%,rgba(13,17,23,0.75) 55%,transparent 100%);padding:1.6rem 1.4rem;">
+            <p style="font-size:var(--ts-sm);color:var(--text);line-height:1.75;font-weight:400;">
+              1번 이미지의 <strong style="color:var(--green);">배경화면과 액팅</strong>에 2번 이미지의 <strong style="color:var(--green);">메신저 화면</strong>만 사용하고 싶다면,<br>
+              프리픽에서는 이미지를 연결하고 태그를 지어 <strong style="color:var(--green);">원하는 이미지를 재생성</strong>할 수 있음
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═════ 슬라이드 8 ═════ -->
+  <section class="slide" id="s8">
+    <div class="s8-inner">
+      <div class="s8-stats">
+        <div class="stat-item" style="--i:0">
+          <span class="stat-num">40<span style="font-size:0.5em;opacity:0.7">+</span></span>
+          <span class="stat-label">한 번에 생성 가능한 이미지 수</span>
+        </div>
+        <div class="stat-item" style="--i:1">
+          <span class="stat-num" style="font-size:var(--ts-2xl)">1번</span>
+          <span class="stat-label">프롬프트 설정 횟수</span>
+        </div>
+        <div style="margin-left:auto; text-align:right;">
+          <span class="eyebrow">제작 노하우 ③</span>
+          <p style="font-size:var(--ts-lg);font-weight:800;margin-top:0.3rem">List 기능으로 대량 이미지 뽑기</p>
+        </div>
+      </div>
+      <div class="s8-body">
+        <ul class="s8-bullets body">
+          <li>List 기능: 하나의 노드에서 여러 변형 이미지를 자동으로 대량 생성</li>
+          <li>실제 활용: <span class="green">'타로버블티와 어울리는 10대 소녀 데이트룩 패션 의상/소품 10가지'</span> 리스트 생성</li>
+          <li>생성된 결과물 중 원하는 이미지만 선택해 합성에 활용</li>
+          <li>반복 프롬프트 없이 한 번의 설정으로 다양한 변형 확보</li>
+        </ul>
+        <div class="visual" style="min-height:0;flex:1;">
+          <img src="공차_발표_이미지/slide8_list.png" style="width:100%;height:100%;object-fit:contain;border-radius:10px;border:1px solid rgba(39,191,88,0.15);">
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═════ 슬라이드 9 ═════ -->
+  <section class="slide" id="s9">
+    <div class="s9-inner">
+      <span class="eyebrow">소소한 팁</span>
+      <h2 class="headline">레퍼런스는 미리 모아두세요</h2>
+      <div class="s9-body">
+        <ul class="s9-bullets body">
+          <li>AI 제작 시 <span class="green">'원하는 느낌'을 설명하는 레퍼런스 이미지</span>가 핵심</li>
+          <li>평소 핀터레스트(Pinterest)에 마음에 드는 구도·조명·연출 이미지 꾸준히 아카이빙</li>
+          <li>해당 이미지를 LLM에 첨부 → <span class="green">'이 느낌으로 프롬프트 만들어줘'</span> 요청</li>
+          <li>LLM이 이미지를 분석해 정확한 AI 생성 프롬프트로 변환 → 원하는 느낌 재현</li>
+        </ul>
+        <div class="s9-right visual">
+          <img src="공차_발표_이미지/slide9_pinterset.png" class="s9-img" style="max-width:100%;max-height:42vh;width:auto;height:auto;object-fit:contain;border-radius:8px;border:1px solid rgba(39,191,88,0.15);box-shadow:0 8px 30px rgba(0,0,0,0.4);align-self:center;">
+          <div class="flow-mini cta">
+            <div class="fm-node">
+              <span class="fm-icon">📌</span>
+              Pinterest
+            </div>
+            <span class="fm-arrow">→</span>
+            <div class="fm-node">
+              <span class="fm-icon">🤖</span>
+              LLM
+            </div>
+            <span class="fm-arrow">→</span>
+            <div class="fm-node">
+              <span class="fm-icon">✦</span>
+              Freepik
+            </div>
+            <span class="fm-arrow">→</span>
+            <div class="fm-node">
+              <span class="fm-icon">🎬</span>
+              완성
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═════ 슬라이드 10 ═════ -->
+  <section class="slide" id="s10">
+    <div class="s10-inner">
+      <div class="s10-index">
+        <span class="idx-num">01</span>
+        <span class="idx-label">추천 이유</span>
+      </div>
+      <div class="s10-mid">
+        <span class="eyebrow">프리픽을 추천하는 이유</span>
+        <h2 class="headline">노드 기반 워크스페이스로<br>전체 흐름을 설계·관리</h2>
+        <div class="feat-cards body">
+          <div class="feat-card">하나의 스페이스에서 노드로 모든 요소 연결 → <span class="green">결과물 전체 연결감 실시간 확인</span></div>
+          <div class="feat-card">단발적 이미지 생성이 아닌 <span class="green">짜임새 있는 AI 영상 제작</span> 가능</div>
+          <div class="feat-card">프롬프트 하나 → 이미지 하나 방식을 넘어, <span class="green">창작 과정 자체를 설계하고 자동화</span></div>
+          <div class="feat-card">어떤 장면이 어떤 노드에서 나왔는지 추적 가능 → <span class="green">수정·재생성이 효율적</span></div>
+        </div>
+      </div>
+      <div class="s10-right visual">
+        <img src="공차_발표_이미지/slide10_workspace.png" class="s10-img" style="max-width:100%;max-height:62vh;width:auto;height:auto;object-fit:contain;border-radius:10px;box-shadow:0 0 0 1px rgba(39,191,88,0.15),0 20px 50px rgba(0,0,0,0.4);">
+      </div>
+    </div>
+  </section>
+
+  <!-- ═════ 슬라이드 11 ═════ -->
+  <section class="slide" id="s11">
+    <div class="s11-inner">
+      <div class="s11-top">
+        <span class="s11-index-num">02</span>
+        <div>
+          <span class="eyebrow">프리픽을 추천하는 이유</span>
+          <h2 class="headline">단 하나의 플랫폼으로<br>LLM → 이미지 → 영상 완성</h2>
+        </div>
+      </div>
+      <div class="s11-body">
+        <ul class="s11-bullets body">
+          <li>힉스필드처럼 하나의 플랫폼에서 <span class="green">다양한 AI 모델 통합 사용</span></li>
+          <li>이미지 모델 + 영상 모델을 <span class="green">플랫폼 전환 없이</span> 동일 스페이스에서 활용</li>
+          <li>더 나아가 <span class="green">LLM 모델까지 동일 스페이스 내에서 연동</span> 가능</li>
+          <li>러프한 생각부터 완성 영상까지 <span class="green">한 공간에서 끝</span></li>
+        </ul>
+        <div class="workflow-wrap visual">
+          <p class="wf-label muted">전체 워크플로우 — 모두 Freepik 안에서</p>
+          <div class="wf-flow">
+            <div class="wf-step">
+              <span class="wf-icon">💭</span>
+              러프한 생각
+              <span class="wf-sub">아이디어 단초</span>
+            </div>
+            <span class="wf-arrow">→</span>
+            <div class="wf-step">
+              <span class="wf-icon">🤖</span>
+              LLM 프롬프트화
+              <span class="wf-sub">Gemini / GPT</span>
+            </div>
+            <span class="wf-arrow">→</span>
+            <div class="wf-step">
+              <span class="wf-icon">🖼️</span>
+              이미지 생성
+              <span class="wf-sub">Nano Banana Pro</span>
+            </div>
+            <span class="wf-arrow">→</span>
+            <div class="wf-step">
+              <span class="wf-icon">🎬</span>
+              영상 완성
+              <span class="wf-sub">Kling 3.0</span>
+            </div>
+          </div>
+          <span class="wf-caption cta">⬡ 모두 Freepik 하나의 스페이스에서</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+</div><!-- /deck -->
+
+<!-- UI 크롬 -->
+<div class="ui-chrome">
+  <span class="nav-hint">← →</span>
+  <div class="progress-track">
+    <div class="progress-bar" id="pbar"></div>
+  </div>
+  <span class="slide-counter" id="counter">1 / 11</span>
+</div>
+
+<script>
+const slides = document.querySelectorAll('.slide');
+const pbar   = document.getElementById('pbar');
+const counter= document.getElementById('counter');
+const TOTAL  = slides.length;
+let cur = 0;
+
+function goTo(n) {
+  if (n < 0 || n >= TOTAL || n === cur) return;
+  const dir  = n > cur ? 1 : -1;
+  const prev = slides[cur];
+  const next = slides[n];
+
+  prev.style.setProperty('--exit-x',  `${-dir * 60}px`);
+  prev.classList.remove('active');
+  prev.classList.add('exiting');
+  setTimeout(() => prev.classList.remove('exiting'), 500);
+
+  next.style.setProperty('--enter-x', `${dir * 60}px`);
+  cur = n;
+  next.classList.add('active');
+
+  // progress
+  pbar.style.width   = `${((cur + 1) / TOTAL) * 100}%`;
+  counter.textContent= `${cur + 1} / ${TOTAL}`;
+}
+
+document.addEventListener('keydown', e => {
+  if (['ArrowRight','ArrowDown',' '].includes(e.key)) { e.preventDefault(); goTo(cur + 1); }
+  if (['ArrowLeft', 'ArrowUp'      ].includes(e.key)) { e.preventDefault(); goTo(cur - 1); }
+  if (e.key === 'Home') goTo(0);
+  if (e.key === 'End' ) goTo(TOTAL - 1);
+  if (e.key === 'f' || e.key === 'F') document.documentElement.requestFullscreen?.();
+});
+
+// 터치 스와이프
+let tx = 0;
+document.addEventListener('touchstart', e => { tx = e.touches[0].clientX; }, { passive:true });
+document.addEventListener('touchend',   e => {
+  const dx = e.changedTouches[0].clientX - tx;
+  if (Math.abs(dx) > 50) goTo(dx < 0 ? cur + 1 : cur - 1);
+}, { passive:true });
+
+// 초기 progress
+pbar.style.width = `${(1 / TOTAL) * 100}%`;
+</script>
+</body>
+</html>
